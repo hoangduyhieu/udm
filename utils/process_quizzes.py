@@ -1,12 +1,17 @@
 import os
 import json
+from pathvalidate import sanitize_filename
 from constants import QUIZ_URL, logger
 
-def download_quiz(udemy, quiz_id, folder_path, title_of_output_quiz, task_id, progress, portal_name="www"):
+def download_quiz(udemy, quiz_id, folder_path, title_of_output_quiz, task_id, progress, portal_name="www", quiz_order=None):
     """Download and process a quiz from Udemy"""
     progress.update(task_id, description=f"Downloading Quiz {title_of_output_quiz}", completed=0)
     
-    quiz_filename = f"{title_of_output_quiz}.html"
+    # Format quiz filename
+    if quiz_order is not None:
+        quiz_filename = f"Quiz {quiz_order} - {sanitize_filename(title_of_output_quiz)}.html"
+    else:
+        quiz_filename = f"{title_of_output_quiz}.html"
     
     # Log the quiz URL we're accessing for debugging
     quiz_url = QUIZ_URL.format(portal_name=portal_name, quiz_id=quiz_id)
@@ -86,7 +91,7 @@ def download_quiz(udemy, quiz_id, folder_path, title_of_output_quiz, task_id, pr
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
             
-        progress.console.log(f"[green]Downloaded {title_of_output_quiz}[/green] ✓")
+        progress.console.log(f"[green]Downloaded {quiz_filename}[/green] ✓")
         
     except Exception as e:
         logger.error(f"Error processing quiz: {str(e)}")
