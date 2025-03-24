@@ -307,13 +307,14 @@ class Udemy:
         except KeyError:
             pass
 
-    def download_quiz(self, course_id, quiz, temp_folder_path, quiz_title, folder_path, task_id, progress):
+    def download_quiz(self, course_id, quiz, temp_folder_path, quiz_title, folder_path, task_id, progress, quiz_index=None):
         """Download a quiz from Udemy"""
         quiz_id = quiz['id']
         
         if not skip_quizzes:
             from utils.process_quizzes import download_quiz as process_quiz
-            process_quiz(self, quiz_id, folder_path, quiz_title, task_id, progress, portal_name)
+            # Pass the actual quiz index instead of trying to extract it from the title
+            process_quiz(self, quiz_id, folder_path, quiz_title, task_id, progress, portal_name, quiz_index)
         
         # Clean up temporary folder
         try:
@@ -335,6 +336,8 @@ class Udemy:
         
         # Create separate counters for lectures in each chapter
         chapter_lecture_counts = {}
+        # Create separate counters for quizzes in each chapter
+        chapter_quiz_counts = {}
 
         with ThreadPoolExecutor(max_workers=max_concurrent_lectures) as executor, Live(progress, refresh_per_second=10):
             # Task generator for iterating through chapters and lectures
@@ -365,23 +368,27 @@ class Udemy:
                     if chapter_id not in chapter_lecture_counts:
                         chapter_lecture_counts[chapter_id] = 1
                     
+                    # Initialize quiz count for this chapter if needed
+                    if chapter_id not in chapter_quiz_counts:
+                        chapter_quiz_counts[chapter_id] = 1
+                    
                     # Handle quiz or lecture
                     if lecture.get('_class') == 'quiz':
-                        # Format quiz titles consistently
-                        quiz_number = self.extract_quiz_number(lecture['title'])
-                        if quiz_number:
-                            formatted_quiz_title = f"Quiz {quiz_number} - {sanitize_filename(lecture['title'])}"
-                        else:
-                            formatted_quiz_title = f"Quiz - {sanitize_filename(lecture['title'])}"
+                        # Format quiz title
+                        formatted_quiz_title = sanitize_filename(lecture['title'])
                         
                         if not skip_quizzes:
+                            # Get the quiz counter for this chapter
+                            quiz_index = chapter_quiz_counts[chapter_id]
+                            chapter_quiz_counts[chapter_id] += 1
+                            
                             task_id = progress.add_task(
                                 f"Downloading Quiz: {lecture['title']} ({lindex}/{len(chapter['children'])})", 
                                 total=100
                             )
                             future = executor.submit(
                                 self.download_quiz, course_id, lecture, temp_folder_path, formatted_quiz_title, 
-                                folder_path, task_id, progress
+                                folder_path, task_id, progress, quiz_index
                             )
                             futures.append((task_id, future))
                     else:
@@ -436,22 +443,26 @@ class Udemy:
                         if chapter_id not in chapter_lecture_counts:
                             chapter_lecture_counts[chapter_id] = 1
                         
+                        # Initialize quiz count for this chapter if needed
+                        if chapter_id not in chapter_quiz_counts:
+                            chapter_quiz_counts[chapter_id] = 1
+                        
                         if lecture.get('_class') == 'quiz':
-                            # Format quiz titles consistently
-                            quiz_number = self.extract_quiz_number(lecture['title'])
-                            if quiz_number:
-                                formatted_quiz_title = f"Quiz {quiz_number} - {sanitize_filename(lecture['title'])}"
-                            else:
-                                formatted_quiz_title = f"Quiz - {sanitize_filename(lecture['title'])}"
+                            # Format quiz title
+                            formatted_quiz_title = sanitize_filename(lecture['title'])
                             
                             if not skip_quizzes:
+                                # Get the quiz counter for this chapter
+                                quiz_index = chapter_quiz_counts[chapter_id]
+                                chapter_quiz_counts[chapter_id] += 1
+                                
                                 task_id = progress.add_task(
                                     f"Downloading Quiz: {lecture['title']} ({lindex}/{len(chapter['children'])})", 
                                     total=100
                                 )
                                 future = executor.submit(
                                     self.download_quiz, course_id, lecture, temp_folder_path, formatted_quiz_title, 
-                                    folder_path, task_id, progress
+                                    folder_path, task_id, progress, quiz_index
                                 )
                                 futures.append((task_id, future))
                         else:
