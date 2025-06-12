@@ -8,6 +8,16 @@ def download_article(udemy, article, download_folder_path, title_of_output_artic
     progress.update(task_id, description=f"Downloading Article {title_of_output_article}", completed=0)
 
     article_filename = f"{title_of_output_article}.html"
+    article_file_path = os.path.join(os.path.dirname(download_folder_path), article_filename)
+
+    # Check if file already exists
+    if os.path.exists(article_file_path):
+        progress.update(task_id, completed=100)
+        progress.console.log(f"[yellow]Already exists {title_of_output_article}[/yellow] ⚠")
+        progress.remove_task(task_id)
+        shutil.rmtree(download_folder_path)
+        return
+
     article_response = udemy.request(ARTICLE_URL.format(portal_name=portal_name, article_id=article['id'])).json()
     
     # Debug the response structure
@@ -28,7 +38,7 @@ def download_article(udemy, article, download_folder_path, title_of_output_artic
         shutil.rmtree(download_folder_path)
         return
 
-    with open(os.path.join(os.path.dirname(download_folder_path), article_filename), 'w', encoding='utf-8', errors='replace') as file:
+    with open(article_file_path, 'w', encoding='utf-8', errors='replace') as file:
         file.write(article_content)
 
     progress.console.log(f"[green]Downloaded {title_of_output_article}[/green] ✓")

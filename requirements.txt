@@ -9,6 +9,7 @@ mdurl
 pathvalidate
 pycryptodome
 Pygments
+pywidevine
 requests
 rich
 tqdm

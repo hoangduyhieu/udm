@@ -3,8 +3,9 @@ import re
 import shutil
 import subprocess
 import requests
+import json
 from urllib.parse import urlparse
-from constants import remove_emojis_and_binary, timestamp_to_seconds
+from constants import remove_emojis_and_binary, timestamp_to_seconds, HOME_DIR, logger
 
 def download_and_merge_mpd(mpd_file_url, download_folder_path, title_of_output_mp4, length, key, task_id, progress, portal_name="www"):
     progress.update(task_id,  description=f"Downloading Stream {remove_emojis_and_binary(title_of_output_mp4)}", completed=0)
@@ -20,11 +21,59 @@ def download_and_merge_mpd(mpd_file_url, download_folder_path, title_of_output_m
 
     process_mpd(mpd_file_path, download_folder_path, title_of_output_mp4, length, key, task_id, progress)
 
+def load_keys_from_json():
+    """Load DRM keys from JSON file"""
+    keys_file = os.path.join(HOME_DIR, "drm_keys.json")
+    if os.path.exists(keys_file):
+        try:
+            with open(keys_file, 'r') as f:
+                keys_data = json.load(f)
+            return keys_data
+        except Exception as e:
+            logger.warning(f"Failed to load keys from drm_keys.json: {e}")
+    return {}
+
+def get_appropriate_key(mpd_file_path, provided_key):
+    """Get appropriate key for decryption"""
+    if provided_key:
+        return provided_key
+
+    # Try to load keys from JSON
+    keys_data = load_keys_from_json()
+    if keys_data:
+        # For now, use the first available key
+        # In the future, we could match PSSH to specific keys
+        # New format: {"kid": "key"} -> combine to "kid:key"
+        first_kid = next(iter(keys_data.keys()))
+        first_key_value = keys_data[first_kid]
+        combined_key = f"{first_kid}:{first_key_value}"
+        logger.info("Using auto-loaded DRM key for decryption")
+        return combined_key
+
+    return None
+
 def process_mpd(mpd_file_path, download_folder_path, output_file_name, length, key, task_id, progress):
+    # Check if final output file already exists
+    final_output_path = os.path.join(os.path.dirname(download_folder_path), output_file_name + ".mp4")
+    if os.path.exists(final_output_path):
+        progress.update(task_id, completed=100)
+        progress.console.log(f"[yellow]Already exists {remove_emojis_and_binary(output_file_name)}[/yellow] ⚠")
+        progress.remove_task(task_id)
+        shutil.rmtree(download_folder_path)
+        return
+
+    # Get appropriate key for decryption
+    decryption_key = get_appropriate_key(mpd_file_path, key)
+
+    if not decryption_key:
+        progress.console.log(f"[red]No decryption key available for {remove_emojis_and_binary(output_file_name)}[/red] ✕")
+        progress.remove_task(task_id)
+        return
+
     nm3u8dl_command = (
         f"n_m3u8dl-re \"{mpd_file_path}\" --save-dir \"{download_folder_path}\" "
         f"--save-name \"{output_file_name}.mp4\" --auto-select --concurrent-download "
-        f"--key {key} --del-after-done --no-log --tmp-dir \"{download_folder_path}\" "
+        f"--key {decryption_key} --del-after-done --no-log --tmp-dir \"{download_folder_path}\" "
         f"--log-level ERROR"
     )
 

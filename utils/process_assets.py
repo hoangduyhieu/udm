@@ -17,8 +17,12 @@ def process_files(udemy, asset, course_id, lecture_id, download_folder_path, por
     assets_folder = os.path.join(download_folder_path, "assets")
     if not os.path.exists(assets_folder):
         os.makedirs(assets_folder)
-    
+
     asset_file_path = os.path.join(assets_folder, asset['filename'])
+
+    # Check if file already exists
+    if os.path.exists(asset_file_path):
+        return
 
     file_response = udemy.request(udemy.request(FILE_ASSET_URL.format(portal_name=portal_name, course_id=course_id, lecture_id=lecture_id, asset_id=asset['id'])).json()['download_urls']['File'][0]['file'])
 
@@ -36,6 +40,10 @@ def process_external_links(udemy, asset, course_id, lecture_id, download_folder_
 
     asset_filename = f"{asset['filename']}.url"
     asset_file_path = os.path.join(external_links_folder, asset_filename)
+
+    # Check if file already exists
+    if os.path.exists(asset_file_path):
+        return
 
     response = udemy.request(LINK_ASSET_URL.format(portal_name=portal_name, course_id=course_id, lecture_id=lecture_id, asset_id=asset['id'])).json()
 

@@ -12,7 +12,15 @@ def download_quiz(udemy, quiz_id, folder_path, title_of_output_quiz, task_id, pr
         quiz_filename = f"Quiz {quiz_order} - {sanitize_filename(title_of_output_quiz)}.html"
     else:
         quiz_filename = f"{title_of_output_quiz}.html"
-    
+
+    # Check if file already exists
+    output_path = os.path.join(folder_path, quiz_filename)
+    if os.path.exists(output_path):
+        progress.update(task_id, completed=100)
+        progress.console.log(f"[yellow]Already exists {quiz_filename}[/yellow] ⚠")
+        progress.remove_task(task_id)
+        return
+
     # Log the quiz URL we're accessing for debugging
     quiz_url = QUIZ_URL.format(portal_name=portal_name, quiz_id=quiz_id)
     logger.debug(f"Requesting quiz URL: {quiz_url}")
@@ -86,8 +94,7 @@ def download_quiz(udemy, quiz_id, folder_path, title_of_output_quiz, task_id, pr
             }
         
         html_content = html_template.replace("__data_placeholder__", json.dumps(quiz_data))
-        
-        output_path = os.path.join(folder_path, quiz_filename)
+
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
             

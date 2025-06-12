@@ -18,7 +18,7 @@ sys.stderr.reconfigure(encoding='utf-8')
 # Update URLs to be dynamic based on the subdomain
 COURSE_URL = "https://{portal_name}.udemy.com/api-2.0/courses/{course_id}/"
 CURRICULUM_URL = "https://{portal_name}.udemy.com/api-2.0/courses/{course_id}/subscriber-curriculum-items/?page_size=200&fields[lecture]=title,object_index,is_published,sort_order,created,asset,supplementary_assets,is_free&fields[quiz]=title,object_index,is_published,sort_order,type&fields[practice]=title,object_index,is_published,sort_order&fields[chapter]=title,object_index,is_published,sort_order&fields[asset]=title,filename,asset_type,status,time_estimation,is_external&caching_intent=True"
-LECTURE_URL = "https://{portal_name}.udemy.com/api-2.0/users/me/subscribed-courses/{course_id}/lectures/{lecture_id}?fields[lecture]=asset,description,download_url,is_free,last_watched_second&fields[asset]=asset_type,media_sources,captions,download_urls,slide_urls,external_url"
+LECTURE_URL = "https://{portal_name}.udemy.com/api-2.0/users/me/subscribed-courses/{course_id}/lectures/{lecture_id}?fields[lecture]=asset,description,download_url,is_free,last_watched_second&fields[asset]=asset_type,length,media_license_token,course_is_drmed,media_sources,captions,thumbnail_sprite,slides,slide_urls,download_urls,external_url&q={rand}"
 QUIZ_URL = "https://{portal_name}.udemy.com/api-2.0/quizzes/{quiz_id}/assessments/?version=1&page_size=200&fields[assessment]=id,assessment_type,prompt,correct_response,section,question_plain,related_lectures"
 LINK_ASSET_URL = "https://{portal_name}.udemy.com/api-2.0/users/me/subscribed-courses/{course_id}/lectures/{lecture_id}/supplementary-assets/{asset_id}/?fields[asset]=external_url"
 FILE_ASSET_URL = "https://{portal_name}.udemy.com/api-2.0/users/me/subscribed-courses/{course_id}/lectures/{lecture_id}/supplementary-assets/{asset_id}/?fields[asset]=download_urls"
@@ -41,12 +41,14 @@ logger.setLevel(logging.INFO)
 # Create console handler with UTF-8 encoding
 console_handler = logging.StreamHandler(sys.stdout)  # Explicitly use stdout
 console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s : %(message)s'))
+console_formatter = logging.Formatter('%(asctime)s %(levelname)s : %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+console_handler.setFormatter(console_formatter)
 
 # Create file handler with UTF-8 encoding
 file_handler = logging.FileHandler(LOG_FILE_PATH, encoding='utf-8')
 file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s : %(message)s'))
+file_formatter = logging.Formatter('%(asctime)s %(levelname)s : %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+file_handler.setFormatter(file_formatter)
 
 # Add handlers to logger
 logger.addHandler(console_handler)
@@ -104,10 +106,9 @@ class Loader:
 
     def stop(self):
         self.done = True
-        # Clear the spinner line
+        # Clear the spinner line and add one blank line
         cols = shutil.get_terminal_size(fallback=(80, 20)).columns
-        print("\r" + " " * cols, end="", flush=True)
-        print("\r", end="", flush=True)
+        print("\r" + " " * cols + "\r\n", end="", flush=True)
 
     def __exit__(self, exc_type, exc_value, tb):
         self.stop()
@@ -159,7 +160,11 @@ def timestamp_to_seconds(timestamp):
 def format_time(seconds):
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
-    return f"{hours}hr {minutes}min {seconds}s" if hours > 0 else f"{minutes}min {seconds}s"
+    # Format with 1 decimal place for both hours and minutes, whole seconds
+    if hours > 0:
+        return f"{hours}.0hr {minutes}.0min {int(seconds)}s"
+    else:
+        return f"{minutes}.0min {int(seconds)}s"
 
 def parse_chapter_filter(chapter_str):
     """

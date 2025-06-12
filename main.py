@@ -25,6 +25,7 @@ from utils.process_assets import download_supplementary_assets
 from utils.process_articles import download_article
 from utils.process_mp4 import download_mp4
 from utils.process_quizzes import download_quiz
+from utils.auto_drm import AutoDRM
 
 console = Console()
 
@@ -66,8 +67,7 @@ class Udemy:
         global portal_name
         portal_name = self.extract_portal_name(course_url)
         logger.info(f"Portal name detected: {portal_name}")
-
-        with Loader(f"Fetching course ID"):            
+        with Loader(f"Fetching course ID"):
             response = self.request(course_url)
             content_str = response.content.decode('utf-8')
 
@@ -194,7 +194,8 @@ class Udemy:
 
     def fetch_lecture_info(self, course_id, lecture_id):
         try:
-            return self.request(LECTURE_URL.format(portal_name=portal_name, course_id=course_id, lecture_id=lecture_id)).json()
+            import random
+            return self.request(LECTURE_URL.format(portal_name=portal_name, course_id=course_id, lecture_id=lecture_id, rand=random.random())).json()
         except Exception as e:
             logger.critical(f"Failed to fetch lecture info: {e}")
             sys.exit(1)
@@ -215,7 +216,7 @@ class Udemy:
             logger.error(f"Failed to create directory \"{path}\": {e}")
             sys.exit(1)
 
-    def download_lecture(self, course_id, lecture, lect_info, temp_folder_path, lindex, folder_path, task_id, progress):
+    def download_lecture(self, course_id, lecture, lect_info, temp_folder_path, lindex, folder_path, task_id, progress, drm_key=None):
         if not skip_captions and len(lect_info["asset"]["captions"]) > 0:
             download_captions(lect_info["asset"]["captions"], folder_path, f"{lindex}. {sanitize_filename(lecture['title'])}", captions, convert_to_srt, portal_name)
 
@@ -239,9 +240,9 @@ class Udemy:
                     else:
                         download_and_merge_m3u8(m3u8_url, temp_folder_path, f"{lindex}. {sanitize_filename(lecture['title'])}", task_id, progress, portal_name)
                 else:
-                    if key is None:
+                    if drm_key is None:
                         logger.warning("The video appears to be DRM-protected, and it may not play without a valid Widevine decryption key.")
-                    download_and_merge_mpd(mpd_url, temp_folder_path, f"{lindex}. {sanitize_filename(lecture['title'])}", lecture['asset']['time_estimation'], key, task_id, progress, portal_name)
+                    download_and_merge_mpd(mpd_url, temp_folder_path, f"{lindex}. {sanitize_filename(lecture['title'])}", lecture['asset']['time_estimation'], drm_key, task_id, progress, portal_name)
             elif asset_type == "Article":
                 if not skip_articles:
                     download_article(self, lect_info['asset'], temp_folder_path, f"{lindex}. {sanitize_filename(lecture['title'])}", task_id, progress, portal_name)
@@ -293,7 +294,7 @@ class Udemy:
             else:
                 logger.warning(f"Unsupported asset type: {asset_type} for lecture: {lecture['title']}")
                 progress.console.log(f"[yellow]Skipping unsupported asset type: {asset_type} for {lindex}. {sanitize_filename(lecture['title'])}[/yellow]")
-                
+
                 # Clean up the temporary folder for skipped lectures too
                 try:
                     if os.path.exists(temp_folder_path) and os.path.isdir(temp_folder_path):
@@ -301,6 +302,18 @@ class Udemy:
                         logger.debug(f"Removed temporary folder: {temp_folder_path}")
                 except Exception as e:
                     logger.warning(f"Could not remove temporary folder {temp_folder_path}: {str(e)}")
+        else:
+            # If skipping lectures, just mark task as completed
+            progress.update(task_id, completed=100)
+            progress.console.log(f"[blue]Skipped lecture: {sanitize_filename(lecture['title'])}[/blue] ⏭")
+
+            # Clean up the temporary folder for skipped lectures
+            try:
+                if os.path.exists(temp_folder_path) and os.path.isdir(temp_folder_path):
+                    shutil.rmtree(temp_folder_path)
+                    logger.debug(f"Removed temporary folder: {temp_folder_path}")
+            except Exception as e:
+                logger.warning(f"Could not remove temporary folder {temp_folder_path}: {str(e)}")
 
         try:
             progress.remove_task(task_id)
@@ -323,7 +336,7 @@ class Udemy:
         except Exception as e:
             logger.warning(f"Could not remove temporary folder {temp_folder_path}: {str(e)}")
 
-    def download_course(self, course_id, curriculum):
+    def download_course(self, course_id, curriculum, drm_key=None):
         progress = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -397,16 +410,16 @@ class Udemy:
                         formatted_lecture_index = f"{lecture_number:02}" if lecture_number < 10 else f"{lecture_number}"
                         chapter_lecture_counts[chapter_id] += 1
                         
-                        if not skip_lectures:
-                            lect_info = self.fetch_lecture_info(course_id, lecture['id'])
-                            task_id = progress.add_task(
-                                f"Downloading Lecture: {lecture['title']} ({lindex}/{len(chapter['children'])})", 
-                                total=100
-                            )
-                            future = executor.submit(
-                                self.download_lecture, course_id, lecture, lect_info, temp_folder_path, formatted_lecture_index, folder_path, task_id, progress
-                            )
-                            futures.append((task_id, future))
+                        # Always fetch lecture info for captions/assets, even if skipping lectures
+                        lect_info = self.fetch_lecture_info(course_id, lecture['id'])
+                        task_id = progress.add_task(
+                            f"Downloading Lecture: {lecture['title']} ({lindex}/{len(chapter['children'])})",
+                            total=100
+                        )
+                        future = executor.submit(
+                            self.download_lecture, course_id, lecture, lect_info, temp_folder_path, formatted_lecture_index, folder_path, task_id, progress, drm_key
+                        )
+                        futures.append((task_id, future))
                 except StopIteration:
                     break
 
@@ -471,16 +484,16 @@ class Udemy:
                             formatted_lecture_index = f"{lecture_number:02}" if lecture_number < 10 else f"{lecture_number}"
                             chapter_lecture_counts[chapter_id] += 1
                             
-                            if not skip_lectures:
-                                lect_info = self.fetch_lecture_info(course_id, lecture['id'])
-                                task_id = progress.add_task(
-                                    f"Downloading Lecture: {lecture['title']} ({lindex}/{len(chapter['children'])})",
-                                    total=100
-                                )
-                                future = executor.submit(
-                                    self.download_lecture, course_id, lecture, lect_info, temp_folder_path, formatted_lecture_index, folder_path, task_id, progress
-                                )
-                                futures.append((task_id, future))
+                            # Always fetch lecture info for captions/assets, even if skipping lectures
+                            lect_info = self.fetch_lecture_info(course_id, lecture['id'])
+                            task_id = progress.add_task(
+                                f"Downloading Lecture: {lecture['title']} ({lindex}/{len(chapter['children'])})",
+                                total=100
+                            )
+                            future = executor.submit(
+                                self.download_lecture, course_id, lecture, lect_info, temp_folder_path, formatted_lecture_index, folder_path, task_id, progress, drm_key
+                            )
+                            futures.append((task_id, future))
                     except StopIteration:
                         break
                 
@@ -549,6 +562,18 @@ def parse_chapter_filter(chapter_filter_str):
 bearer_token = None
 skip_quizzes = False
 
+def extract_course_slug_from_url(url):
+    """Extract course slug from Udemy URL"""
+    if not url:
+        return None
+
+    # Pattern to match course slug from URL like: https://www.udemy.com/course/the-ultimate-react-course/
+    import re
+    match = re.search(r'/course/([^/]+)', url)
+    if match:
+        return match.group(1)
+    return None
+
 def main():
 
     try:
@@ -577,6 +602,8 @@ def main():
         parser.add_argument("--skip-articles", type=bool, default=False, help="Skip downloading articles", action=LoadAction, nargs='?')
         parser.add_argument("--skip-assignments", type=bool, default=False, help="Skip downloading assignments", action=LoadAction, nargs='?')
         parser.add_argument("--skip-quizzes", type=bool, default=False, help="Skip downloading quizzes", action=LoadAction, nargs='?')
+
+        parser.add_argument("--slug-name", help="Use course slug as folder name instead of full title", action="store_true")
         
         args = parser.parse_args()
 
@@ -586,6 +613,8 @@ def main():
         course_url = args.url
 
         key = args.key
+
+        # Note: DRM keys will be automatically extracted and loaded later in the auto-DRM phase
 
         if args.concurrent > 25:
             logger.warning("The maximum number of concurrent downloads is 25. The provided number of concurrent downloads will be capped to 25.")
@@ -616,7 +645,7 @@ def main():
 
         if not check_prerequisites():
             return
-        
+
         udemy = Udemy()
 
         if args.id:
@@ -626,6 +655,9 @@ def main():
         else:
             course_id = udemy.extract_course_id(course_url)
             # portal_name should be set by extract_course_id
+
+        # Auto-DRM is now enabled by default
+        auto_drm_enabled = True
 
         if args.captions:
             try:
@@ -643,9 +675,25 @@ def main():
         skip_quizzes = args.skip_quizzes
 
         course_info = udemy.fetch_course(course_id)
-        COURSE_DIR = os.path.join(DOWNLOAD_DIR, remove_emojis_and_binary(sanitize_filename(course_info['title'])))
 
+        # Determine folder name based on --slug-name parameter
+        if args.slug_name:
+            # Try to get slug from URL first
+            course_slug = extract_course_slug_from_url(course_url)
+            if course_slug:
+                folder_name = course_slug
+                logger.info(f"Using course slug as folder name: {folder_name}")
+            else:
+                # Fallback to sanitized title if no slug found
+                folder_name = remove_emojis_and_binary(sanitize_filename(course_info['title']))
+                logger.warning(f"Could not extract slug from URL, using sanitized title: {folder_name}")
+        else:
+            # Default behavior: use full title
+            folder_name = remove_emojis_and_binary(sanitize_filename(course_info['title']))
+
+        COURSE_DIR = os.path.join(DOWNLOAD_DIR, folder_name)
         logger.info(f"Course Title: {course_info['title']}")
+        logger.info(f"Download Directory: {COURSE_DIR}")
 
         udemy.create_directory(os.path.join(COURSE_DIR))
 
@@ -716,10 +764,47 @@ def main():
         else:
             chapter_filter = None
 
+        print()
+        # Auto-DRM functionality - extract keys first (now enabled by default)
+        logger.info("Checking for DRM content and extracting keys if needed...")
+        try:
+            auto_drm = AutoDRM(udemy, portal_name)
+            auto_drm.extract_and_save_keys(course_id)
+
+            # Auto-load the extracted keys for this session (only if no manual key provided)
+            if key is None:
+                keys_file = os.path.join(HOME_DIR, "drm_keys.json")
+                if os.path.exists(keys_file):
+                    try:
+                        with open(keys_file, 'r') as f:
+                            content = f.read().strip()
+
+                        # Check if file is not empty before parsing JSON
+                        if content:
+                            keys_data = json.loads(content)
+                            if keys_data:
+                                # New format: {"kid": "key"} -> combine to "kid:key"
+                                first_kid = next(iter(keys_data.keys()))
+                                first_key_value = keys_data[first_kid]
+                                key = f"{first_kid}:{first_key_value}"
+                                logger.info("✅ Auto-loaded extracted DRM key for download")
+                            else:
+                                logger.info("📝 No DRM keys found - course appears to be DRM-free")
+                        else:
+                            logger.info("📝 No DRM keys found - course appears to be DRM-free")
+                    except (json.JSONDecodeError, FileNotFoundError) as e:
+                        logger.info("📝 No valid DRM keys found - course appears to be DRM-free")
+                else:
+                    logger.info("📝 No DRM keys file found - course appears to be DRM-free")
+        except Exception as e:
+            logger.warning(f"Auto-DRM check failed: {e}")
+            # Continue with download even if auto-DRM fails, in case content is not DRM-protected
+
+        print()
         logger.info("The course download is starting. Please wait while the materials are being downloaded.")
 
         start_time = time.time()
-        udemy.download_course(course_id, course_curriculum)
+        udemy.download_course(course_id, course_curriculum, key)
         end_time = time.time()
 
         elapsed_time = end_time - start_time
